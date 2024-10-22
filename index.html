@@ -1,15 +1,49 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Ankle Mosaic</title>
-    <!-- Load the p5.js library from CDN -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
-    <!-- Link to your custom p5.js code -->
-    <script src="sketch.js"></script>
-  </head>
-  <body>
-    <!-- The canvas will be automatically created by p5.js -->
-  </body>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="ie=edge">
+  <title>Ankle Mosaic GIF Generator</title>
+
+  <!-- Include p5.js Library from CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
+  
+  <!-- Include CCapture.js from CDN for GIF creation -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/ccapture.js/1.1.1/CCapture.all.min.js"></script>
+
+  <!-- Link to Your Custom p5.js Script (sketch.js) -->
+  <script src="sketch.js" defer></script>
+
+  <style>
+    /* Basic styling to make the canvas responsive */
+    body {
+      margin: 0;
+      padding: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      flex-direction: column;
+      height: 100vh;
+    }
+
+    canvas {
+      max-width: 100%;
+      height: auto;
+    }
+
+    #controls {
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div id="controls">
+    <!-- Upload Button -->
+    <input type="file" id="upload" accept="image/*">
+    <!-- Slider to control "tightness" -->
+    <input type="range" id="controlSlider" min="1" max="80" value="40">
+    <label for="controlSlider">Control Density</label>
+  </div>
+</body>
 </html>
