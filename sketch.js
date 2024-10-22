@@ -15,7 +15,7 @@ function preload() {
 function setup() {
   // Dynamically resize the canvas based on window size
   let aspectRatio = referenceImg.width / referenceImg.height;
-  let canvasWidth = min(windowWidth * 0.9, 1000); // Limit width to max 1000px, 90% of the window width
+  let canvasWidth = min(windowWidth * 0.9, 800); // Cap at 800px for desktop
   let canvasHeight = canvasWidth / aspectRatio; // Adjust height based on aspect ratio
 
   createCanvas(canvasWidth, canvasHeight);
@@ -52,7 +52,7 @@ function handleFileUpload() {
 // Resize canvas based on the aspect ratio of the uploaded image
 function resizeCanvasAccordingToImage() {
   let aspectRatio = referenceImg.width / referenceImg.height;
-  let canvasWidth = min(windowWidth * 0.9, 1000);
+  let canvasWidth = min(windowWidth * 0.9, 800);
   let canvasHeight = canvasWidth / aspectRatio;
   resizeCanvas(canvasWidth, canvasHeight);
 }

@@ -8,7 +8,7 @@
 
   <!-- Include p5.js Library from CDN -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
-  
+
   <!-- Link to Your Custom p5.js Script (sketch.js) -->
   <script src="sketch.js" defer></script>
 
@@ -64,6 +64,17 @@
 
       button {
         width: 90%;
+      }
+    }
+
+    /* Media query for Desktop to avoid canvas overflow */
+    @media (min-width: 800px) {
+      canvas {
+        max-width: 800px; /* Set a max width to avoid overflowing the screen on desktop */
+      }
+
+      input[type="file"], input[type="range"] {
+        max-width: 400px; /* Ensure controls remain at a reasonable size on desktop */
       }
     }
   </style>
