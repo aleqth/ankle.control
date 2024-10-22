@@ -4,19 +4,16 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="X-UA-Compatible" content="ie=edge">
-  <title>Ankle Mosaic GIF Generator</title>
+  <title>Ankle Mosaic Generator</title>
 
   <!-- Include p5.js Library from CDN -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
   
-  <!-- Include CCapture.js from CDN for GIF creation -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/ccapture.js/1.1.1/CCapture.all.min.js"></script>
-
   <!-- Link to Your Custom p5.js Script (sketch.js) -->
   <script src="sketch.js" defer></script>
 
   <style>
-    /* Basic styling to make the canvas responsive */
+    /* Basic styling to make the canvas responsive and fit both iOS and Desktop */
     body {
       margin: 0;
       padding: 0;
@@ -24,6 +21,7 @@
       justify-content: center;
       align-items: center;
       flex-direction: column;
+      background-color: #f0f0f0;
       height: 100vh;
     }
 
@@ -33,7 +31,40 @@
     }
 
     #controls {
-      margin-top: 10px;
+      margin-top: 15px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    input[type="file"], input[type="range"] {
+      margin: 10px;
+      width: 80%;
+      max-width: 400px;
+    }
+
+    button {
+      padding: 10px 20px;
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background-color: #45a049;
+    }
+
+    /* Media query for mobile iPhone 13 Pro and up */
+    @media (max-width: 430px) {
+      input[type="file"], input[type="range"] {
+        width: 90%;
+      }
+
+      button {
+        width: 90%;
+      }
     }
   </style>
 </head>
@@ -41,9 +72,13 @@
   <div id="controls">
     <!-- Upload Button -->
     <input type="file" id="upload" accept="image/*">
+    
     <!-- Slider to control "tightness" -->
     <input type="range" id="controlSlider" min="1" max="80" value="40">
     <label for="controlSlider">Control Density</label>
+
+    <!-- Save Button -->
+    <button id="saveBtn">Save Image</button>
   </div>
 </body>
 </html>

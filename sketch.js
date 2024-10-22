@@ -4,8 +4,7 @@ let tileSize = 40; // Default tile size
 let smoothFactor; // Factor for controlling smoothness
 let contrastFactor; // Factor for adapting based on image complexity
 let fileInput, controlSlider; // For image upload and controlling density
-let capturer;
-let capturing = false;
+let saveButton; // Save button
 let userImage; // To track the uploaded image
 
 function preload() {
@@ -16,12 +15,12 @@ function preload() {
 function setup() {
   // Dynamically resize the canvas based on window size
   let aspectRatio = referenceImg.width / referenceImg.height;
-  let canvasWidth = min(windowWidth, 1000); // Limit width to max 1000px
+  let canvasWidth = min(windowWidth * 0.9, 1000); // Limit width to max 1000px, 90% of the window width
   let canvasHeight = canvasWidth / aspectRatio; // Adjust height based on aspect ratio
 
   createCanvas(canvasWidth, canvasHeight);
   imageMode(CENTER);
-  
+
   // Create input for image upload
   fileInput = select('#upload');
   fileInput.changed(handleFileUpload);
@@ -29,6 +28,10 @@ function setup() {
   // Create slider to control density/tightness
   controlSlider = select('#controlSlider');
   controlSlider.input(updateControl);
+
+  // Create Save button functionality
+  saveButton = select('#saveBtn');
+  saveButton.mousePressed(saveImage);
 
   noLoop(); // No continuous looping for performance reasons
 }
@@ -49,7 +52,7 @@ function handleFileUpload() {
 // Resize canvas based on the aspect ratio of the uploaded image
 function resizeCanvasAccordingToImage() {
   let aspectRatio = referenceImg.width / referenceImg.height;
-  let canvasWidth = min(windowWidth, 1000);
+  let canvasWidth = min(windowWidth * 0.9, 1000);
   let canvasHeight = canvasWidth / aspectRatio;
   resizeCanvas(canvasWidth, canvasHeight);
 }
@@ -102,6 +105,11 @@ function draw() {
       pop();
     }
   }
+}
+
+// Function to save the current canvas as an image
+function saveImage() {
+  saveCanvas('ankle_mosaic', 'png');
 }
 
 // Function to calculate contrast at a specific pixel location
