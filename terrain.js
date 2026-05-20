@@ -20,7 +20,9 @@
   let density = 70;            // columns; rows derived from aspect ratio
   let cellOverlap = 1.4;       // tile scale relative to cell size — slight overlap for continuity
   let autoRotate = false;
-  let motionMode = 'none';     // 'none' | 'wave' | 'pulse' | 'twist'
+  let motionMode = 'breathe';  // 'none' | 'wave' | 'pulse' | 'twist' | 'breathe' | 'cascade' | 'ripple' | 'walk' | 'flutter' | 'orbit' | 'sentient'
+  let motionIntensity = 1.0;   // overall scaling for motion magnitude (0..2)
+  let exportSpin = false;      // when true, GIF/Video adds a 360° Y rotation across the loop. Default OFF — record the live viewport.
   let motionStartTime = performance.now();
   let tintMode = 'reference';  // 'original' | 'solid' | 'reference' — default 'reference' so the output is colored on first paint instead of inheriting the asset PNG's flat color.
   let tintColor = '#ff8c5a';   // color used when tintMode === 'solid'
@@ -252,24 +254,97 @@
   function applyMotion(timeSec) {
     if (!mesh || motionMode === 'none') return;
     const dummy = new THREE.Object3D();
+    const I = motionIntensity;
+    // Center of the grid in cell coordinates — used by ripple / orbit modes.
+    const cx = (cols - 1) / 2;
+    const cy = (rows - 1) / 2;
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
         const idx = r * cols + c;
-        const x = (c - (cols - 1) / 2) * cellSize;
-        const y = -(r - (rows - 1) / 2) * cellSize;
+        const x = (c - cx) * cellSize;
+        const y = -(r - cy) * cellSize;
         let z = baseZ[idx];
-        let rotZ = 0;
+        let dx = 0, dy = 0, rotZ = 0;
         // Recover luminance from base z to keep scale modulation correct.
         const lum = depthAmplitude > 0 ? Math.min(1, z / depthAmplitude) : 0.5;
         let sc = instanceBaseScale(lum);
+
         if (motionMode === 'wave') {
-          z += Math.sin(timeSec * 1.6 + c * 0.18 + r * 0.05) * 1.4;
+          // Horizontal sine wave across columns — each row delayed.
+          z += Math.sin(timeSec * 1.6 + c * 0.18 + r * 0.05) * 1.4 * I;
+
         } else if (motionMode === 'pulse') {
-          sc *= (1 + Math.sin(timeSec * 2 + (r + c) * 0.07) * 0.18);
+          // Uniform breathing scale modulation phased by position.
+          sc *= (1 + Math.sin(timeSec * 2 + (r + c) * 0.07) * 0.18 * I);
+
         } else if (motionMode === 'twist') {
-          rotZ = Math.sin(timeSec * 1.2 + idx * 0.013) * 0.5;
+          // Each cell rocks around its own center — like a field of feet
+          // turning back and forth, hence the "sentient" feel.
+          rotZ = Math.sin(timeSec * 1.2 + idx * 0.013) * 0.5 * I;
+
+        } else if (motionMode === 'breathe') {
+          // Whole mosaic expands and contracts slightly — calm default.
+          const s = 1 + Math.sin(timeSec * 1.1) * 0.06 * I;
+          sc *= s;
+          z += Math.sin(timeSec * 0.9) * 0.6 * I;
+
+        } else if (motionMode === 'cascade') {
+          // Diagonal sweep — feels like rain or a wave passing through.
+          const phase = timeSec * 2 - (c + r) * 0.18;
+          z += Math.sin(phase) * 1.6 * I;
+          sc *= (1 + Math.sin(phase) * 0.08 * I);
+
+        } else if (motionMode === 'ripple') {
+          // Concentric rings from grid center — drop a stone in water.
+          const dxC = c - cx, dyC = r - cy;
+          const d = Math.sqrt(dxC * dxC + dyC * dyC);
+          z += Math.sin(timeSec * 2.4 - d * 0.55) * 1.8 * I;
+
+        } else if (motionMode === 'walk') {
+          // Subtle vertical bob with horizontal sway — feet stepping.
+          dy += Math.abs(Math.sin(timeSec * 2.6 + idx * 0.011)) * 1.0 * I;
+          dx += Math.sin(timeSec * 2.6 + idx * 0.011) * 0.4 * I;
+          rotZ = Math.sin(timeSec * 2.6 + idx * 0.011) * 0.08 * I;
+
+        } else if (motionMode === 'flutter') {
+          // High-frequency low-amplitude jitter on rotation + z.
+          // Per-instance noise so it doesn't feel coherent.
+          const n = Math.sin(idx * 0.91 + timeSec * 9) * 0.6
+                  + Math.cos(idx * 0.37 + timeSec * 6) * 0.4;
+          rotZ = n * 0.16 * I;
+          z += n * 0.3 * I;
+
+        } else if (motionMode === 'orbit') {
+          // Each cell traces a small circle around its anchor.
+          const phase = timeSec * 1.4 + idx * 0.05;
+          dx += Math.cos(phase) * cellSize * 0.15 * I;
+          dy += Math.sin(phase) * cellSize * 0.15 * I;
+          rotZ = phase * 0.08;
+
+        } else if (motionMode === 'sentient') {
+          // Composite mode — feet/ankles that feel like they're aware:
+          // gentle breath + per-cell rotation looking for the camera +
+          // occasional twitch. This is the "the thinker" mode the user
+          // described: the assets feel like a population, not a texture.
+          const breath = Math.sin(timeSec * 0.7) * 0.04;
+          sc *= (1 + breath * I);
+          // Long, slow looking-around motion, offset by position so the
+          // whole field doesn't move in unison.
+          const lookT = timeSec * 0.4 + (c * 0.12 - r * 0.08);
+          rotZ = Math.sin(lookT) * 0.28 * I;
+          // Subtle drift toward the centroid then back out.
+          const dxC = c - cx, dyC = r - cy;
+          const d = Math.sqrt(dxC * dxC + dyC * dyC) + 0.001;
+          const pull = Math.sin(timeSec * 0.55 + d * 0.2) * 0.18 * I;
+          dx += (dxC / d) * pull * cellSize * 0.3;
+          dy += (dyC / d) * pull * cellSize * 0.3;
+          // Twitch: a sparse hard z-pop on a small fraction of cells.
+          if ((Math.sin(timeSec * 1.7 + idx * 1.31) > 0.985)) {
+            z += 2.2 * I;
+          }
         }
-        dummy.position.set(x, y, z);
+
+        dummy.position.set(x + dx, y + dy, z);
         dummy.rotation.set(0, 0, rotZ);
         dummy.scale.set(sc, sc, 1);
         dummy.updateMatrix();
@@ -402,13 +477,21 @@
   }
 
   // Render a frame at progress t in [0,1) into the live renderer canvas.
-  // Forces a 360° Y rotation across the loop so the export always shows
-  // depth. Motion modes (wave / pulse / twist) keep running as-is.
+  // By default the camera/mesh orientation is whatever the user has set in
+  // the live viewport — we just animate the motion mode forward. Set
+  // exportSpin=true to overlay a 360° Y rotation across the loop (the old
+  // behavior — kept as an option, no longer the default).
   function renderExportFrame(t, startYaw) {
     if (!mesh) return;
-    yaw = startYaw + t * Math.PI * 2;
-    mesh.rotation.set(pitch, yaw, 0);
+    if (exportSpin) {
+      yaw = startYaw + t * Math.PI * 2;
+      mesh.rotation.set(pitch, yaw, 0);
+    } else {
+      // Keep the user's current orbit position frozen during export.
+      mesh.rotation.set(pitch, startYaw, 0);
+    }
     if (motionMode !== 'none') {
+      // Loop the motion phase across the recording so the result tiles.
       const tSec = t * exportDuration;
       applyMotion(tSec);
     }
@@ -609,6 +692,10 @@
       apply();
     }
     const motion = document.getElementById('terrain-motion');
+    if (motion) {
+      // Reflect the default into the select on first paint.
+      motion.value = motionMode;
+    }
     if (motion) motion.addEventListener('change', () => {
       motionMode = motion.value;
       motionStartTime = performance.now();
@@ -646,6 +733,24 @@
     });
     const ar = document.getElementById('terrain-rotate');
     if (ar) ar.addEventListener('change', () => { autoRotate = ar.checked; });
+    // Spin-during-export toggle — when off (default), the GIF/Video records
+    // the viewport AS-IS; when on, overlays a 360° Y rotation across the loop.
+    const spinChk = document.getElementById('terrain-export-spin');
+    if (spinChk) {
+      spinChk.checked = exportSpin;
+      spinChk.addEventListener('change', () => { exportSpin = spinChk.checked; });
+    }
+    // Motion intensity — multiplies amplitude across all modes.
+    const mi = document.getElementById('terrain-motion-intensity');
+    const miVal = document.getElementById('terrain-motion-intensity-val');
+    if (mi) {
+      const apply = () => {
+        motionIntensity = parseFloat(mi.value) || 0;
+        if (miVal) miVal.textContent = motionIntensity.toFixed(2).replace(/\.?0+$/, '') + '×';
+      };
+      mi.addEventListener('input', apply);
+      apply();
+    }
     const save = document.getElementById('terrain-save');
     if (save) save.addEventListener('click', savePng);
 

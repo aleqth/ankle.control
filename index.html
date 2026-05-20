@@ -80,11 +80,22 @@
           <label for="terrain-motion">Motion</label>
           <select id="terrain-motion">
             <option value="none">None (still)</option>
+            <option value="breathe" selected>Breathe (subtle, default)</option>
+            <option value="sentient">Sentient (looking around)</option>
             <option value="wave">Wave</option>
             <option value="pulse">Pulse</option>
-            <option value="twist">Twist</option>
+            <option value="twist">Twist (per-cell rock)</option>
+            <option value="cascade">Cascade (diagonal sweep)</option>
+            <option value="ripple">Ripple (from center)</option>
+            <option value="walk">Walk (step bob)</option>
+            <option value="flutter">Flutter (jitter)</option>
+            <option value="orbit">Orbit (small circles)</option>
           </select>
           <span class="val"></span>
+
+          <label for="terrain-motion-intensity">Motion intensity</label>
+          <input id="terrain-motion-intensity" type="range" min="0" max="2" value="1" step="0.05">
+          <span id="terrain-motion-intensity-val" class="val">1.0×</span>
 
           <label for="terrain-tint">Asset color</label>
           <select id="terrain-tint">
@@ -128,8 +139,10 @@
           <input id="export-quality" type="range" min="1" max="30" value="10" step="1">
           <span id="export-quality-val" class="val">10</span>
 
-          <div class="row-full">
-            <label class="chk"><input id="terrain-rotate" type="checkbox"> Auto-rotate</label>
+          <div class="row-full export-row">
+            <label class="chk"><input id="terrain-rotate" type="checkbox"> Auto-rotate (live)</label>
+            <label class="chk"><input id="terrain-export-spin" type="checkbox"> 360° spin during export</label>
+            <span class="export-spacer"></span>
             <button id="terrain-save" type="button" class="btn">PNG</button>
             <button id="terrain-gif" type="button" class="btn">GIF</button>
             <button id="terrain-video" type="button" class="btn primary">Video</button>
