@@ -43,7 +43,7 @@
 
         <label for="asset-upload">Asset PNG</label>
         <input id="asset-upload" type="file" accept="image/*">
-        <button id="asset-reset" class="btn" type="button">Reset to ankle</button>
+        <button id="asset-reset" type="button" class="btn" type="button">Reset to ankle</button>
       </div>
 
       <!-- Mode tabs -->
@@ -60,8 +60,8 @@
           <span id="mosaic-tile-val" class="val">40</span>
 
           <div class="row-full">
-            <button id="mosaic-save" class="btn">Save PNG</button>
-            <button id="mosaic-save-hires" class="btn primary">Save PNG (hi-res)</button>
+            <button id="mosaic-save" type="button" class="btn">Save PNG</button>
+            <button id="mosaic-save-hires" type="button" class="btn primary">Save PNG (hi-res)</button>
           </div>
         </div>
       </div>
@@ -88,9 +88,9 @@
 
           <label for="terrain-tint">Asset color</label>
           <select id="terrain-tint">
-            <option value="original" selected>Original (from PNG)</option>
+            <option value="reference" selected>From reference (sampled per cell)</option>
+            <option value="original">Original (from PNG)</option>
             <option value="solid">Solid color</option>
-            <option value="reference">From reference image</option>
           </select>
           <span class="val" id="tint-color-wrap" style="display:none"><input id="terrain-tint-color" type="color" value="#ff8c5a" style="width:36px;height:18px;padding:0;border:1px inset #fff"></span>
 
@@ -109,7 +109,7 @@
 
           <label for="bg-upload">BG image</label>
           <input id="bg-upload" type="file" accept="image/*">
-          <button id="bg-clear" class="btn" type="button">Clear bg img</button>
+          <button id="bg-clear" type="button" class="btn" type="button">Clear bg img</button>
 
           <label for="export-duration">Loop length</label>
           <input id="export-duration" type="range" min="1" max="10" value="3" step="0.5">
@@ -130,9 +130,9 @@
 
           <div class="row-full">
             <label class="chk"><input id="terrain-rotate" type="checkbox"> Auto-rotate</label>
-            <button id="terrain-save" class="btn">PNG</button>
-            <button id="terrain-gif" class="btn">GIF</button>
-            <button id="terrain-video" class="btn primary">Video</button>
+            <button id="terrain-save" type="button" class="btn">PNG</button>
+            <button id="terrain-gif" type="button" class="btn">GIF</button>
+            <button id="terrain-video" type="button" class="btn primary">Video</button>
           </div>
         </div>
         <div class="info" style="margin-top:0;margin-bottom:10px;font-size:12px">

@@ -22,7 +22,7 @@
   let autoRotate = false;
   let motionMode = 'none';     // 'none' | 'wave' | 'pulse' | 'twist'
   let motionStartTime = performance.now();
-  let tintMode = 'original';   // 'original' | 'solid' | 'reference'
+  let tintMode = 'reference';  // 'original' | 'solid' | 'reference' — default 'reference' so the output is colored on first paint instead of inheriting the asset PNG's flat color.
   let tintColor = '#ff8c5a';   // color used when tintMode === 'solid'
   let scaleByLuminance = true; // make brighter pixels render larger so the image emerges
   let exportDuration = 3;      // seconds (loop length for GIF / video export)
@@ -366,14 +366,27 @@
   }
 
   function savePng() {
-    if (!renderer) return;
-    renderer.render(scene, camera);
-    const url = renderer.domElement.toDataURL('image/png');
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'ankle_terrain_' + Date.now() + '.png';
-    document.body.appendChild(a); a.click(); a.remove();
-    AnkleControl.setStatus('saved terrain PNG');
+    try {
+      if (!renderer) {
+        AnkleControl.setStatus('PNG export: renderer not ready — load an image first');
+        return;
+      }
+      renderer.render(scene, camera);
+      const url = renderer.domElement.toDataURL('image/png');
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'ankle_terrain_' + Date.now() + '.png';
+      // Some setups need rel=noopener to allow download; harmless when not needed.
+      a.rel = 'noopener';
+      document.body.appendChild(a);
+      a.click();
+      // Defer cleanup so the browser has actually committed the click.
+      setTimeout(() => { try { a.remove(); } catch(_){} }, 100);
+      AnkleControl.setStatus('saved terrain PNG → check your Downloads folder');
+    } catch (e) {
+      console.error('[ankle.control] PNG export failed:', e);
+      AnkleControl.setStatus('PNG export failed: ' + (e && e.message ? e.message : e));
+    }
   }
 
   // Fetch gif.worker.js into a Blob URL so it can be used cross-origin.
@@ -453,17 +466,30 @@
       AnkleControl.setStatus('gif encoding ' + Math.round(p * 100) + '%');
     });
     gif.on('finished', (blob) => {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'ankle_terrain_' + Date.now() + '.gif';
-      document.body.appendChild(a); a.click(); a.remove();
-      URL.revokeObjectURL(url);
+      try {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'ankle_terrain_' + Date.now() + '.gif';
+        a.rel = 'noopener';
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => { try { a.remove(); URL.revokeObjectURL(url); } catch(_){} }, 250);
+        const kb = Math.round(blob.size / 1024);
+        AnkleControl.setStatus('gif saved (' +
+          (kb > 1024 ? (blob.size / 1048576).toFixed(1) + ' MB' : kb + ' KB') + ') → check your Downloads folder');
+      } catch (e) {
+        console.error('[ankle.control] GIF download failed:', e);
+        AnkleControl.setStatus('GIF download failed: ' + (e && e.message ? e.message : e));
+      } finally {
+        btn.disabled = false; if (vbtn) vbtn.disabled = false;
+        btn.textContent = label;
+      }
+    });
+    gif.on('abort', () => {
+      AnkleControl.setStatus('gif aborted');
       btn.disabled = false; if (vbtn) vbtn.disabled = false;
       btn.textContent = label;
-      const kb = Math.round(blob.size / 1024);
-      AnkleControl.setStatus('gif saved (' +
-        (kb > 1024 ? (blob.size / 1048576).toFixed(1) + ' MB' : kb + ' KB') + ')');
     });
     gif.render();
   }
@@ -508,19 +534,27 @@
 
     const done = new Promise((resolve) => {
       rec.onstop = () => {
-        const blob = new Blob(chunks, { type: mimeType });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'ankle_terrain_' + Date.now() + '.' + ext;
-        document.body.appendChild(a); a.click(); a.remove();
-        URL.revokeObjectURL(url);
-        btn.disabled = false; if (gbtn) gbtn.disabled = false;
-        btn.textContent = label;
-        const kb = Math.round(blob.size / 1024);
-        AnkleControl.setStatus('video saved (' +
-          (kb > 1024 ? (blob.size / 1048576).toFixed(1) + ' MB' : kb + ' KB') + ') .' + ext);
-        resolve();
+        try {
+          const blob = new Blob(chunks, { type: mimeType });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'ankle_terrain_' + Date.now() + '.' + ext;
+          a.rel = 'noopener';
+          document.body.appendChild(a);
+          a.click();
+          setTimeout(() => { try { a.remove(); URL.revokeObjectURL(url); } catch(_){} }, 250);
+          const kb = Math.round(blob.size / 1024);
+          AnkleControl.setStatus('video saved (' +
+            (kb > 1024 ? (blob.size / 1048576).toFixed(1) + ' MB' : kb + ' KB') + ') .' + ext + ' → check your Downloads folder');
+        } catch (e) {
+          console.error('[ankle.control] video download failed:', e);
+          AnkleControl.setStatus('video download failed: ' + (e && e.message ? e.message : e));
+        } finally {
+          btn.disabled = false; if (gbtn) gbtn.disabled = false;
+          btn.textContent = label;
+          resolve();
+        }
       };
     });
 
