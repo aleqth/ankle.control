@@ -22,7 +22,9 @@
   let autoRotate = false;
   let motionMode = 'breathe';  // 'none' | 'wave' | 'pulse' | 'twist' | 'breathe' | 'cascade' | 'ripple' | 'walk' | 'flutter' | 'orbit' | 'sentient'
   let motionIntensity = 1.0;   // overall scaling for motion magnitude (0..2)
+  let motionSpeed = 1.0;       // playback rate multiplier on the motion phase (0.1..4)
   let exportSpin = false;      // when true, GIF/Video adds a 360° Y rotation across the loop. Default OFF — record the live viewport.
+  let exportTransparent = false; // when true, GIF/Video export uses a transparent background (alpha preserved through the renderer)
   let motionStartTime = performance.now();
   let tintMode = 'reference';  // 'original' | 'solid' | 'reference' — default 'reference' so the output is colored on first paint instead of inheriting the asset PNG's flat color.
   let tintColor = '#ff8c5a';   // color used when tintMode === 'solid'
@@ -359,7 +361,7 @@
     raf = requestAnimationFrame(loop);
     if (autoRotate && mesh) { yaw += 0.003; mesh.rotation.y = yaw; }
     if (motionMode !== 'none') {
-      const t = (performance.now() - motionStartTime) / 1000;
+      const t = ((performance.now() - motionStartTime) / 1000) * motionSpeed;
       applyMotion(t);
     }
     if (renderer) renderer.render(scene, camera);
@@ -492,7 +494,9 @@
     }
     if (motionMode !== 'none') {
       // Loop the motion phase across the recording so the result tiles.
-      const tSec = t * exportDuration;
+      // Motion speed multiplier respected so the exported clip moves at
+      // the same rate the user previewed.
+      const tSec = t * exportDuration * motionSpeed;
       applyMotion(tSec);
     }
     renderer.render(scene, camera);
@@ -521,6 +525,10 @@
     const cnv = renderer.domElement;
     const totalFrames = Math.max(2, Math.round(exportDuration * exportFps));
     const delayMs = Math.round(1000 / exportFps);
+    // gif.js supports a transparent index. When the user wants a transparent
+    // bg, drop the scene background so the canvas reveals page transparency.
+    const savedBg = scene ? scene.background : null;
+    if (exportTransparent && scene) scene.background = null;
     const gif = new window.GIF({
       workers: 4,
       quality: exportQuality,
@@ -528,6 +536,7 @@
       height: cnv.height,
       workerScript: _gifWorkerUrl,
       repeat: 0,
+      transparent: exportTransparent ? 0x000000 : null,
     });
 
     const savedYaw = yaw;
@@ -541,6 +550,9 @@
       AnkleControl.setStatus('gif frame ' + (i + 1) + '/' + totalFrames);
       if (i % 6 === 0) await new Promise((r) => setTimeout(r, 0));
     }
+
+    // Restore background after frame capture so the live preview returns to normal.
+    if (exportTransparent && scene) scene.background = savedBg;
 
     yaw = savedYaw; autoRotate = savedAuto;
     if (mesh) mesh.rotation.set(pitch, yaw, 0);
@@ -590,17 +602,32 @@
     btn.textContent = 'Video…';
 
     const cnv = renderer.domElement;
-    // Codec fallback ladder — mp4 first (smallest, best compat), then
-    // WebM/VP9 (transparency-capable), then VP8, then generic webm.
-    let mimeType = 'video/mp4';
-    if (!MediaRecorder.isTypeSupported(mimeType)) {
+    // Codec fallback ladder — mp4 first (best compat), then WebM/VP9
+    // (transparency-capable via yuva420p), then VP8, then generic webm.
+    // Transparent export forces VP9-in-webm because mp4 won't carry alpha.
+    let mimeType;
+    if (exportTransparent) {
       mimeType = 'video/webm;codecs=vp9';
       if (!MediaRecorder.isTypeSupported(mimeType)) {
         mimeType = 'video/webm;codecs=vp8';
         if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = 'video/webm';
       }
+    } else {
+      mimeType = 'video/mp4';
+      if (!MediaRecorder.isTypeSupported(mimeType)) {
+        mimeType = 'video/webm;codecs=vp9';
+        if (!MediaRecorder.isTypeSupported(mimeType)) {
+          mimeType = 'video/webm;codecs=vp8';
+          if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = 'video/webm';
+        }
+      }
     }
     const ext = mimeType.indexOf('mp4') !== -1 ? 'mp4' : 'webm';
+
+    // Strip the scene background while recording so canvas alpha passes
+    // through to the encoder. Restored when recording stops.
+    const savedBgVideo = scene ? scene.background : null;
+    if (exportTransparent && scene) scene.background = null;
 
     const stream = cnv.captureStream(exportFps);
     const chunks = [];
@@ -659,6 +686,8 @@
         rec.stop();
         yaw = savedYaw; autoRotate = savedAuto;
         if (mesh) mesh.rotation.set(pitch, yaw, 0);
+        // Restore background after recording stops.
+        if (exportTransparent && scene) scene.background = savedBgVideo;
         return;
       }
       renderExportFrame(t, savedYaw);
@@ -720,16 +749,29 @@
       }
     });
     const tint = document.getElementById('terrain-tint');
+    if (tint) {
+      // Force the <select> to whatever the JS default is — protects against
+      // stale browser-cached HTML where the selected option disagrees with
+      // the script. Without this the dropdown could say "reference" while the
+      // module booted with a different default (or vice versa).
+      tint.value = tintMode;
+    }
     if (tint) tint.addEventListener('change', () => {
       tintMode = tint.value;
-      const tcWrap = document.getElementById('tint-color-wrap');
-      if (tcWrap) tcWrap.style.display = (tintMode === 'solid') ? '' : 'none';
       rebuild();
     });
     const tintC = document.getElementById('terrain-tint-color');
     if (tintC) tintC.addEventListener('input', () => {
       tintColor = tintC.value;
-      if (tintMode === 'solid') rebuild();
+      // Picking a color implies the user wants Solid mode. If they're on
+      // any other mode (reference/original), auto-switch to Solid so the
+      // change is actually visible. Was previously a silent no-op which
+      // looked like the picker was broken.
+      if (tintMode !== 'solid') {
+        tintMode = 'solid';
+        if (tint) tint.value = 'solid';
+      }
+      rebuild();
     });
     const ar = document.getElementById('terrain-rotate');
     if (ar) ar.addEventListener('change', () => { autoRotate = ar.checked; });
@@ -740,6 +782,13 @@
       spinChk.checked = exportSpin;
       spinChk.addEventListener('change', () => { exportSpin = spinChk.checked; });
     }
+    // Transparent-bg export toggle. Strips scene.background while encoding
+    // and forces VP9-in-webm for video so alpha survives the codec.
+    const transChk = document.getElementById('terrain-export-transparent');
+    if (transChk) {
+      transChk.checked = exportTransparent;
+      transChk.addEventListener('change', () => { exportTransparent = transChk.checked; });
+    }
     // Motion intensity — multiplies amplitude across all modes.
     const mi = document.getElementById('terrain-motion-intensity');
     const miVal = document.getElementById('terrain-motion-intensity-val');
@@ -749,6 +798,17 @@
         if (miVal) miVal.textContent = motionIntensity.toFixed(2).replace(/\.?0+$/, '') + '×';
       };
       mi.addEventListener('input', apply);
+      apply();
+    }
+    // Motion speed — playback-rate multiplier on the phase used by each mode.
+    const ms = document.getElementById('terrain-motion-speed');
+    const msVal = document.getElementById('terrain-motion-speed-val');
+    if (ms) {
+      const apply = () => {
+        motionSpeed = parseFloat(ms.value) || 0.0001;
+        if (msVal) msVal.textContent = motionSpeed.toFixed(2).replace(/\.?0+$/, '') + '×';
+      };
+      ms.addEventListener('input', apply);
       apply();
     }
     const save = document.getElementById('terrain-save');

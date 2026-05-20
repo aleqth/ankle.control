@@ -9,9 +9,9 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js"></script>
-<script src="app.js" defer></script>
-<script src="mosaic.js" defer></script>
-<script src="terrain.js" defer></script>
+<script src="app.js?v=4" defer></script>
+<script src="mosaic.js?v=4" defer></script>
+<script src="terrain.js?v=4" defer></script>
 </head>
 <body>
 
@@ -97,13 +97,17 @@
           <input id="terrain-motion-intensity" type="range" min="0" max="2" value="1" step="0.05">
           <span id="terrain-motion-intensity-val" class="val">1.0×</span>
 
+          <label for="terrain-motion-speed">Motion speed</label>
+          <input id="terrain-motion-speed" type="range" min="0.1" max="4" value="1" step="0.05">
+          <span id="terrain-motion-speed-val" class="val">1.0×</span>
+
           <label for="terrain-tint">Asset color</label>
           <select id="terrain-tint">
             <option value="reference" selected>From reference (sampled per cell)</option>
             <option value="original">Original (from PNG)</option>
             <option value="solid">Solid color</option>
           </select>
-          <span class="val" id="tint-color-wrap" style="display:none"><input id="terrain-tint-color" type="color" value="#ff8c5a" style="width:36px;height:18px;padding:0;border:1px inset #fff"></span>
+          <span class="val" id="tint-color-wrap"><input id="terrain-tint-color" type="color" value="#ff8c5a" style="width:48px;height:22px;padding:0;border:1px inset #fff;cursor:pointer" title="Pick a tint — switches Asset color to Solid"></span>
 
           <label for="bg-preset">Background</label>
           <select id="bg-preset">
@@ -142,6 +146,7 @@
           <div class="row-full export-row">
             <label class="chk"><input id="terrain-rotate" type="checkbox"> Auto-rotate (live)</label>
             <label class="chk"><input id="terrain-export-spin" type="checkbox"> 360° spin during export</label>
+            <label class="chk"><input id="terrain-export-transparent" type="checkbox"> Transparent bg</label>
             <span class="export-spacer"></span>
             <button id="terrain-save" type="button" class="btn">PNG</button>
             <button id="terrain-gif" type="button" class="btn">GIF</button>
