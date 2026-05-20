@@ -25,6 +25,10 @@
   let tintMode = 'original';   // 'original' | 'solid' | 'reference'
   let tintColor = '#ff8c5a';   // color used when tintMode === 'solid'
   let scaleByLuminance = true; // make brighter pixels render larger so the image emerges
+  let exportDuration = 3;      // seconds (loop length for GIF / video export)
+  let exportFps = 30;          // frames per second for GIF / video
+  let exportQuality = 10;      // gif.js quality (lower = better, larger file)
+  let _gifWorkerUrl = null;    // cached blob URL of gif.worker.js (cross-origin workaround)
 
   // Per-instance state arrays, refreshed each rebuild.
   let baseZ = null;            // Float32Array of base Z per instance
@@ -372,6 +376,181 @@
     AnkleControl.setStatus('saved terrain PNG');
   }
 
+  // Fetch gif.worker.js into a Blob URL so it can be used cross-origin.
+  // Mirrors the pattern in aleqth.com/motion to avoid CORS on workers.
+  function loadGifWorker() {
+    if (_gifWorkerUrl) return Promise.resolve(_gifWorkerUrl);
+    return fetch('https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.worker.js')
+      .then((r) => r.text())
+      .then((txt) => {
+        _gifWorkerUrl = URL.createObjectURL(new Blob([txt], { type: 'application/javascript' }));
+        return _gifWorkerUrl;
+      });
+  }
+
+  // Render a frame at progress t in [0,1) into the live renderer canvas.
+  // Forces a 360° Y rotation across the loop so the export always shows
+  // depth. Motion modes (wave / pulse / twist) keep running as-is.
+  function renderExportFrame(t, startYaw) {
+    if (!mesh) return;
+    yaw = startYaw + t * Math.PI * 2;
+    mesh.rotation.set(pitch, yaw, 0);
+    if (motionMode !== 'none') {
+      const tSec = t * exportDuration;
+      applyMotion(tSec);
+    }
+    renderer.render(scene, camera);
+  }
+
+  async function exportGif() {
+    if (!renderer) return;
+    if (typeof window.GIF === 'undefined') {
+      AnkleControl.setStatus('gif.js not loaded');
+      return;
+    }
+    const btn = document.getElementById('terrain-gif');
+    const vbtn = document.getElementById('terrain-video');
+    const label = btn.textContent;
+    btn.disabled = true; if (vbtn) vbtn.disabled = true;
+    btn.textContent = 'GIF…';
+    AnkleControl.setStatus('preparing gif worker…');
+    try {
+      await loadGifWorker();
+    } catch (e) {
+      AnkleControl.setStatus('gif worker fetch failed');
+      btn.disabled = false; if (vbtn) vbtn.disabled = false;
+      btn.textContent = label;
+      return;
+    }
+    const cnv = renderer.domElement;
+    const totalFrames = Math.max(2, Math.round(exportDuration * exportFps));
+    const delayMs = Math.round(1000 / exportFps);
+    const gif = new window.GIF({
+      workers: 4,
+      quality: exportQuality,
+      width: cnv.width,
+      height: cnv.height,
+      workerScript: _gifWorkerUrl,
+      repeat: 0,
+    });
+
+    const savedYaw = yaw;
+    const savedAuto = autoRotate;
+    autoRotate = false;
+
+    for (let i = 0; i < totalFrames; i++) {
+      const t = i / totalFrames;
+      renderExportFrame(t, savedYaw);
+      gif.addFrame(cnv, { copy: true, delay: delayMs });
+      AnkleControl.setStatus('gif frame ' + (i + 1) + '/' + totalFrames);
+      if (i % 6 === 0) await new Promise((r) => setTimeout(r, 0));
+    }
+
+    yaw = savedYaw; autoRotate = savedAuto;
+    if (mesh) mesh.rotation.set(pitch, yaw, 0);
+
+    gif.on('progress', (p) => {
+      AnkleControl.setStatus('gif encoding ' + Math.round(p * 100) + '%');
+    });
+    gif.on('finished', (blob) => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'ankle_terrain_' + Date.now() + '.gif';
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      btn.disabled = false; if (vbtn) vbtn.disabled = false;
+      btn.textContent = label;
+      const kb = Math.round(blob.size / 1024);
+      AnkleControl.setStatus('gif saved (' +
+        (kb > 1024 ? (blob.size / 1048576).toFixed(1) + ' MB' : kb + ' KB') + ')');
+    });
+    gif.render();
+  }
+
+  async function exportVideo() {
+    if (!renderer) return;
+    if (typeof MediaRecorder === 'undefined') {
+      AnkleControl.setStatus('MediaRecorder not supported');
+      return;
+    }
+    const btn = document.getElementById('terrain-video');
+    const gbtn = document.getElementById('terrain-gif');
+    const label = btn.textContent;
+    btn.disabled = true; if (gbtn) gbtn.disabled = true;
+    btn.textContent = 'Video…';
+
+    const cnv = renderer.domElement;
+    // Codec fallback ladder — mp4 first (smallest, best compat), then
+    // WebM/VP9 (transparency-capable), then VP8, then generic webm.
+    let mimeType = 'video/mp4';
+    if (!MediaRecorder.isTypeSupported(mimeType)) {
+      mimeType = 'video/webm;codecs=vp9';
+      if (!MediaRecorder.isTypeSupported(mimeType)) {
+        mimeType = 'video/webm;codecs=vp8';
+        if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = 'video/webm';
+      }
+    }
+    const ext = mimeType.indexOf('mp4') !== -1 ? 'mp4' : 'webm';
+
+    const stream = cnv.captureStream(exportFps);
+    const chunks = [];
+    let rec;
+    try {
+      rec = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 12000000 });
+    } catch (e) {
+      AnkleControl.setStatus('video init failed: ' + e.message);
+      btn.disabled = false; if (gbtn) gbtn.disabled = false;
+      btn.textContent = label;
+      return;
+    }
+    rec.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+
+    const done = new Promise((resolve) => {
+      rec.onstop = () => {
+        const blob = new Blob(chunks, { type: mimeType });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'ankle_terrain_' + Date.now() + '.' + ext;
+        document.body.appendChild(a); a.click(); a.remove();
+        URL.revokeObjectURL(url);
+        btn.disabled = false; if (gbtn) gbtn.disabled = false;
+        btn.textContent = label;
+        const kb = Math.round(blob.size / 1024);
+        AnkleControl.setStatus('video saved (' +
+          (kb > 1024 ? (blob.size / 1048576).toFixed(1) + ' MB' : kb + ' KB') + ') .' + ext);
+        resolve();
+      };
+    });
+
+    const savedYaw = yaw;
+    const savedAuto = autoRotate;
+    autoRotate = false;
+
+    rec.start();
+    AnkleControl.setStatus('recording ' + exportDuration + 's @ ' + exportFps + 'fps (' + ext + ')…');
+
+    const startTs = performance.now();
+    const durMs = exportDuration * 1000;
+    const tick = () => {
+      const elapsed = performance.now() - startTs;
+      const t = elapsed / durMs;
+      if (t >= 1) {
+        // Render one last frame at t=1, then stop.
+        renderExportFrame(0.999, savedYaw);
+        rec.stop();
+        yaw = savedYaw; autoRotate = savedAuto;
+        if (mesh) mesh.rotation.set(pitch, yaw, 0);
+        return;
+      }
+      renderExportFrame(t, savedYaw);
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+    await done;
+  }
+
   function wireControls() {
     const dSlider = document.getElementById('terrain-density');
     const dVal = document.getElementById('terrain-density-val');
@@ -435,6 +614,36 @@
     if (ar) ar.addEventListener('change', () => { autoRotate = ar.checked; });
     const save = document.getElementById('terrain-save');
     if (save) save.addEventListener('click', savePng);
+
+    // Export settings
+    const eDur = document.getElementById('export-duration');
+    const eDurVal = document.getElementById('export-duration-val');
+    if (eDur) {
+      const apply = () => {
+        exportDuration = parseFloat(eDur.value);
+        if (eDurVal) eDurVal.textContent = exportDuration + 's';
+      };
+      eDur.addEventListener('input', apply);
+      apply();
+    }
+    const eFps = document.getElementById('export-fps');
+    if (eFps) eFps.addEventListener('change', () => {
+      exportFps = parseInt(eFps.value, 10) || 30;
+    });
+    const eQual = document.getElementById('export-quality');
+    const eQualVal = document.getElementById('export-quality-val');
+    if (eQual) {
+      const apply = () => {
+        exportQuality = parseInt(eQual.value, 10) || 10;
+        if (eQualVal) eQualVal.textContent = String(exportQuality);
+      };
+      eQual.addEventListener('input', apply);
+      apply();
+    }
+    const gifBtn = document.getElementById('terrain-gif');
+    if (gifBtn) gifBtn.addEventListener('click', exportGif);
+    const vidBtn = document.getElementById('terrain-video');
+    if (vidBtn) vidBtn.addEventListener('click', exportVideo);
   }
 
   document.addEventListener('DOMContentLoaded', () => {

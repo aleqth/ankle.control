@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="style.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js"></script>
 <script src="app.js" defer></script>
 <script src="mosaic.js" defer></script>
 <script src="terrain.js" defer></script>
@@ -110,13 +111,32 @@
           <input id="bg-upload" type="file" accept="image/*">
           <button id="bg-clear" class="btn" type="button">Clear bg img</button>
 
+          <label for="export-duration">Loop length</label>
+          <input id="export-duration" type="range" min="1" max="10" value="3" step="0.5">
+          <span id="export-duration-val" class="val">3s</span>
+
+          <label for="export-fps">FPS</label>
+          <select id="export-fps">
+            <option value="15">15</option>
+            <option value="24">24</option>
+            <option value="30" selected>30</option>
+            <option value="60">60</option>
+          </select>
+          <span class="val"></span>
+
+          <label for="export-quality">GIF quality</label>
+          <input id="export-quality" type="range" min="1" max="30" value="10" step="1">
+          <span id="export-quality-val" class="val">10</span>
+
           <div class="row-full">
             <label class="chk"><input id="terrain-rotate" type="checkbox"> Auto-rotate</label>
-            <button id="terrain-save" class="btn primary">Save PNG</button>
+            <button id="terrain-save" class="btn">PNG</button>
+            <button id="terrain-gif" class="btn">GIF</button>
+            <button id="terrain-video" class="btn primary">Video</button>
           </div>
         </div>
         <div class="info" style="margin-top:0;margin-bottom:10px;font-size:12px">
-          Drag inside the canvas to orbit. Mouse wheel to zoom. Auto-rotate disengages on drag. Higher density = more detail but more instances (slower).
+          Drag inside the canvas to orbit. Mouse wheel to zoom. <b>GIF/Video export</b> rotates the model 360° over the loop length (gif.js encoder + MediaRecorder MP4 fallback to WebM/VP9). Lower GIF quality = smaller file. Higher density = more detail but more instances (slower).
         </div>
       </div>
 
