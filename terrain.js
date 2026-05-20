@@ -1,30 +1,37 @@
-// terrain.js — three.js heightmap driven by the reference image.
+// terrain.js — 3D asset-instance reconstruction of the reference image.
 //
-// The plane's vertex Z is set per-grid-cell from the luminance of the
-// reference image (luminance formula 0.299R + 0.587G + 0.114B). The
-// reference image itself is mapped as the texture so the picture is
-// visible on the surface.
+// Renders an InstancedMesh of textured planes (one per grid cell of the
+// reference image). Each instance:
+//   - Position XY = the cell's location in the reference image (centered)
+//   - Position Z  = luminance of that cell × depth amplitude (pops bright
+//                   areas forward; dark areas recede)
+//   - Color       = the sampled RGB of that cell, tinting the (white-mask)
+//                   asset texture
+//   - Optional motion (wave / pulse / twist) applied in the render loop.
 //
-// Controls:
-//   height slider  — Z amplitude multiplier
-//   grid slider    — geometry resolution (more = sharper, slower)
-//   wireframe      — show the underlying mesh
-//   auto-rotate    — slow yaw
-//   texture mode   — color (the image) / grayscale / depth-shading
-//   drag           — orbit / rotate the mesh
-//   wheel          — zoom
+// Viewed head-on, the collection of asset silhouettes reads as the
+// reference picture. Orbit to see the sculptural depth.
 
 (function () {
-  let renderer, scene, camera, mesh, material, geometry, texture;
+  let renderer, scene, camera, mesh, material, geometry, assetTexture, bgTexture;
   let stage, raf = null, started = false;
-  let amplitude = 18;
-  let gridResolution = 120;
-  let autoRotate = true;
-  let wireframe = false;
-  let textureMode = 'color'; // 'color' | 'grayscale' | 'depth'
+
+  let depthAmplitude = 6;
+  let density = 70;            // columns; rows derived from aspect ratio
+  let cellOverlap = 1.4;       // tile scale relative to cell size — slight overlap for continuity
+  let autoRotate = false;
+  let motionMode = 'none';     // 'none' | 'wave' | 'pulse' | 'twist'
+  let motionStartTime = performance.now();
+
+  // Per-instance state arrays, refreshed each rebuild.
+  let baseZ = null;            // Float32Array of base Z per instance
+  let baseColor = null;        // Uint8Array RGB×count (for stable color)
+  let instanceCount = 0;
+  let cellSize = 1;            // world units per cell
+  let cols = 0, rows = 0;
+
   let drag = null;
-  let yaw = -0.15, pitch = 0.55, distance = 95;
-  let rotationVelocity = 0.003;
+  let yaw = 0, pitch = 0, distance = 70;
 
   function init() {
     if (started) return;
@@ -37,29 +44,22 @@
 
     const rect = stage.getBoundingClientRect();
     const W = Math.max(320, Math.floor(rect.width || 800));
-    const H = Math.max(240, Math.floor(W * 0.66));
+    const H = Math.max(280, Math.floor(W * 0.66));
 
-    renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+    renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.setSize(W, H);
-    renderer.setClearColor(0x000000, 1);
     stage.appendChild(renderer.domElement);
 
     scene = new THREE.Scene();
-    camera = new THREE.PerspectiveCamera(45, W / H, 0.1, 1000);
-    camera.position.set(0, 40, distance);
+    applyBackground();
+
+    camera = new THREE.PerspectiveCamera(40, W / H, 0.1, 1000);
+    camera.position.set(0, 0, distance);
     camera.lookAt(0, 0, 0);
 
-    scene.add(new THREE.AmbientLight(0xffffff, 0.55));
-    const dir = new THREE.DirectionalLight(0xffffff, 0.85);
-    dir.position.set(40, 80, 50);
-    scene.add(dir);
-    const fill = new THREE.DirectionalLight(0x8888ff, 0.25);
-    fill.position.set(-40, 20, -30);
-    scene.add(fill);
-
-    rebuildMesh();
-    attachMouse();
+    rebuild();
+    attachInteraction();
     started = true;
     loop();
   }
@@ -68,110 +68,178 @@
     if (!started) return;
     cancelAnimationFrame(raf);
     raf = null;
-    detachMouse();
-    if (mesh) { scene.remove(mesh); }
-    if (geometry) geometry.dispose();
-    if (material) material.dispose();
-    if (texture) texture.dispose();
+    detachInteraction();
+    disposeMesh();
+    if (assetTexture) { assetTexture.dispose(); assetTexture = null; }
+    if (bgTexture) { bgTexture.dispose(); bgTexture = null; }
     if (renderer) {
       renderer.dispose();
       if (renderer.domElement && renderer.domElement.parentNode) {
         renderer.domElement.parentNode.removeChild(renderer.domElement);
       }
     }
-    renderer = scene = camera = mesh = material = geometry = texture = null;
+    renderer = scene = camera = null;
+    baseZ = null; baseColor = null; instanceCount = 0;
     started = false;
   }
 
-  function refresh() {
-    if (!started) return;
-    rebuildMesh();
+  function disposeMesh() {
+    if (mesh) { scene.remove(mesh); }
+    if (geometry) { geometry.dispose(); geometry = null; }
+    if (material) { material.dispose(); material = null; }
+    mesh = null;
   }
 
-  function rebuildMesh() {
+  function applyBackground() {
+    if (!scene) return;
+    if (AnkleControl.state.backgroundImage) {
+      const img = AnkleControl.state.backgroundImage;
+      if (bgTexture) bgTexture.dispose();
+      bgTexture = new THREE.Texture(img);
+      bgTexture.needsUpdate = true;
+      scene.background = bgTexture;
+    } else {
+      try {
+        scene.background = new THREE.Color(AnkleControl.state.backgroundColor);
+      } catch (e) {
+        scene.background = new THREE.Color('#0a0a0e');
+      }
+    }
+  }
+
+  function rebuild() {
     const refImg = AnkleControl.state.referenceImage;
-    if (!refImg) return;
-
-    if (mesh) {
-      scene.remove(mesh);
-      if (geometry) geometry.dispose();
-      if (material) material.dispose();
-      if (texture) texture.dispose();
-    }
-
-    const refW = refImg.naturalWidth, refH = refImg.naturalHeight;
-    const ar = refW / refH;
-    const planeW = 80;
-    const planeH = planeW / ar;
-
-    const segX = gridResolution;
-    const segY = Math.max(20, Math.round(gridResolution / ar));
-    geometry = new THREE.PlaneGeometry(planeW, planeH, segX - 1, segY - 1);
-
-    // Sample image luminance into per-vertex z.
     const refCanvas = AnkleControl.state.referenceCanvas;
-    const sampleCanvas = document.createElement('canvas');
-    sampleCanvas.width = segX;
-    sampleCanvas.height = segY;
-    const sctx = sampleCanvas.getContext('2d');
-    sctx.drawImage(refImg, 0, 0, segX, segY);
-    const data = sctx.getImageData(0, 0, segX, segY).data;
+    const assetCanvas = AnkleControl.state.assetSilhouetteCanvas;
+    if (!refImg || !refCanvas || !assetCanvas) return;
 
-    const pos = geometry.attributes.position;
-    for (let i = 0; i < pos.count; i++) {
-      // Vertices are laid out row-major from top-left. PlaneGeometry uses
-      // (segX) columns × (segY) rows of vertices.
-      const col = i % segX;
-      const row = Math.floor(i / segX);
-      // Image rows count from top → flip Y because plane's Y+ is up.
-      const sx = col;
-      const sy = row;
-      const idx = (sx + sy * segX) * 4;
-      const r = data[idx], g = data[idx + 1], b = data[idx + 2];
-      const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255; // 0..1
-      pos.setZ(i, lum * amplitude);
+    disposeMesh();
+    if (assetTexture) { assetTexture.dispose(); assetTexture = null; }
+
+    // Sample reference image down to `density` columns × derived rows.
+    const refW = refImg.naturalWidth, refH = refImg.naturalHeight;
+    cols = Math.max(20, density);
+    rows = Math.max(20, Math.round(cols * refH / refW));
+    const sample = document.createElement('canvas');
+    sample.width = cols; sample.height = rows;
+    const sctx = sample.getContext('2d');
+    sctx.imageSmoothingEnabled = true;
+    sctx.drawImage(refCanvas, 0, 0, cols, rows);
+    const data = sctx.getImageData(0, 0, cols, rows).data;
+
+    // Compute world layout. Keep the reconstructed picture about 48 units
+    // wide so the default camera (z=70) frames it nicely.
+    const worldWidth = 48;
+    cellSize = worldWidth / cols;
+    const worldHeight = cellSize * rows;
+
+    instanceCount = cols * rows;
+
+    // Asset texture from preprocessed white-silhouette canvas.
+    assetTexture = new THREE.CanvasTexture(assetCanvas);
+    assetTexture.minFilter = THREE.LinearFilter;
+    assetTexture.magFilter = THREE.LinearFilter;
+    assetTexture.needsUpdate = true;
+
+    geometry = new THREE.PlaneGeometry(1, 1);
+    material = new THREE.MeshBasicMaterial({
+      map: assetTexture,
+      transparent: true,
+      alphaTest: 0.2,         // sharper silhouette edges, less ghosting
+      side: THREE.DoubleSide,
+      vertexColors: true,     // enables per-instance color × texture
+      depthWrite: true,
+      depthTest: true,
+    });
+
+    mesh = new THREE.InstancedMesh(geometry, material, instanceCount);
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    if (!mesh.instanceColor) {
+      mesh.instanceColor = new THREE.InstancedBufferAttribute(
+        new Float32Array(instanceCount * 3), 3
+      );
     }
-    pos.needsUpdate = true;
-    geometry.computeVertexNormals();
+    mesh.frustumCulled = false;
 
-    // Build texture per mode.
-    if (textureMode === 'color') {
-      texture = new THREE.Texture(refImg);
-      texture.needsUpdate = true;
-      material = new THREE.MeshPhongMaterial({
-        map: texture, side: THREE.DoubleSide, wireframe,
-        shininess: 18, flatShading: false,
-      });
-    } else if (textureMode === 'grayscale') {
-      const gc = document.createElement('canvas');
-      gc.width = refW; gc.height = refH;
-      const gctx = gc.getContext('2d');
-      gctx.filter = 'grayscale(100%) contrast(115%)';
-      gctx.drawImage(refImg, 0, 0);
-      texture = new THREE.CanvasTexture(gc);
-      material = new THREE.MeshPhongMaterial({
-        map: texture, side: THREE.DoubleSide, wireframe,
-        shininess: 8, flatShading: false,
-      });
-    } else { // depth
-      material = new THREE.MeshPhongMaterial({
-        color: 0xc8c8d4, side: THREE.DoubleSide, wireframe,
-        shininess: 28, flatShading: true,
-      });
+    baseZ = new Float32Array(instanceCount);
+    baseColor = new Float32Array(instanceCount * 3);
+
+    const dummy = new THREE.Object3D();
+    const color = new THREE.Color();
+
+    const scale = cellSize * cellOverlap;
+
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const idx = r * cols + c;
+        const di = idx * 4;
+        const rr = data[di], gg = data[di + 1], bb = data[di + 2];
+        const lum = (0.299 * rr + 0.587 * gg + 0.114 * bb) / 255;
+
+        const x = (c - (cols - 1) / 2) * cellSize;
+        const y = -(r - (rows - 1) / 2) * cellSize;
+        const z = lum * depthAmplitude;
+        baseZ[idx] = z;
+
+        dummy.position.set(x, y, z);
+        dummy.rotation.set(0, 0, 0);
+        dummy.scale.set(scale, scale, 1);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(idx, dummy.matrix);
+
+        color.setRGB(rr / 255, gg / 255, bb / 255);
+        mesh.setColorAt(idx, color);
+        baseColor[idx * 3] = rr / 255;
+        baseColor[idx * 3 + 1] = gg / 255;
+        baseColor[idx * 3 + 2] = bb / 255;
+      }
     }
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
 
-    mesh = new THREE.Mesh(geometry, material);
-    mesh.rotation.x = -Math.PI / 2 + pitch;
-    mesh.rotation.z = yaw;
+    // Center mesh + apply current orientation
+    mesh.rotation.set(pitch, yaw, 0);
     scene.add(mesh);
+
+    AnkleControl.setStatus('terrain: ' + instanceCount + ' instances (' + cols + '×' + rows + ')');
+  }
+
+  function applyMotion(timeSec) {
+    if (!mesh || motionMode === 'none') return;
+    const dummy = new THREE.Object3D();
+    const scaleBase = cellSize * cellOverlap;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const idx = r * cols + c;
+        const x = (c - (cols - 1) / 2) * cellSize;
+        const y = -(r - (rows - 1) / 2) * cellSize;
+        let z = baseZ[idx];
+        let rotZ = 0;
+        let sc = scaleBase;
+        if (motionMode === 'wave') {
+          z += Math.sin(timeSec * 1.6 + c * 0.18 + r * 0.05) * 1.4;
+        } else if (motionMode === 'pulse') {
+          sc = scaleBase * (1 + Math.sin(timeSec * 2 + (r + c) * 0.07) * 0.18);
+        } else if (motionMode === 'twist') {
+          rotZ = Math.sin(timeSec * 1.2 + idx * 0.013) * 0.5;
+        }
+        dummy.position.set(x, y, z);
+        dummy.rotation.set(0, 0, rotZ);
+        dummy.scale.set(sc, sc, 1);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(idx, dummy.matrix);
+      }
+    }
+    mesh.instanceMatrix.needsUpdate = true;
   }
 
   function loop() {
     if (!started) return;
     raf = requestAnimationFrame(loop);
-    if (autoRotate && mesh) {
-      yaw += rotationVelocity;
-      mesh.rotation.z = yaw;
+    if (autoRotate && mesh) { yaw += 0.003; mesh.rotation.y = yaw; }
+    if (motionMode !== 'none') {
+      const t = (performance.now() - motionStartTime) / 1000;
+      applyMotion(t);
     }
     if (renderer) renderer.render(scene, camera);
   }
@@ -180,13 +248,13 @@
     if (!started || !stage || !renderer) return;
     const rect = stage.getBoundingClientRect();
     const W = Math.max(320, Math.floor(rect.width || 800));
-    const H = Math.max(240, Math.floor(W * 0.66));
+    const H = Math.max(280, Math.floor(W * 0.66));
     renderer.setSize(W, H);
     camera.aspect = W / H;
     camera.updateProjectionMatrix();
   }
 
-  function attachMouse() {
+  function attachInteraction() {
     const cnv = renderer.domElement;
     cnv.addEventListener('mousedown', onDown);
     cnv.addEventListener('wheel', onWheel, { passive: false });
@@ -198,7 +266,7 @@
     window.addEventListener('resize', onResize);
   }
 
-  function detachMouse() {
+  function detachInteraction() {
     if (renderer) {
       const cnv = renderer.domElement;
       cnv.removeEventListener('mousedown', onDown);
@@ -212,7 +280,10 @@
     window.removeEventListener('resize', onResize);
   }
 
-  function onDown(e) { drag = { x: e.clientX, y: e.clientY }; autoRotate = syncAutoRotate(false); }
+  function onDown(e) {
+    drag = { x: e.clientX, y: e.clientY };
+    setAutoRotate(false);
+  }
   function onTouchStart(e) {
     if (e.touches.length === 1) { drag = { x: e.touches[0].clientX, y: e.touches[0].clientY }; }
   }
@@ -221,9 +292,8 @@
     const dx = (e.clientX - drag.x) * 0.01;
     const dy = (e.clientY - drag.y) * 0.01;
     yaw += dx;
-    pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, pitch - dy));
-    mesh.rotation.x = -Math.PI / 2 + pitch;
-    mesh.rotation.z = yaw;
+    pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, pitch + dy));
+    mesh.rotation.set(pitch, yaw, 0);
     drag.x = e.clientX; drag.y = e.clientY;
   }
   function onTouchMove(e) {
@@ -232,22 +302,21 @@
     const dx = (e.touches[0].clientX - drag.x) * 0.01;
     const dy = (e.touches[0].clientY - drag.y) * 0.01;
     yaw += dx;
-    pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, pitch - dy));
-    mesh.rotation.x = -Math.PI / 2 + pitch;
-    mesh.rotation.z = yaw;
+    pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, pitch + dy));
+    mesh.rotation.set(pitch, yaw, 0);
     drag.x = e.touches[0].clientX; drag.y = e.touches[0].clientY;
   }
   function onUp() { drag = null; }
   function onWheel(e) {
     e.preventDefault();
-    distance = Math.max(30, Math.min(250, distance + e.deltaY * 0.08));
+    distance = Math.max(20, Math.min(220, distance + e.deltaY * 0.05));
     camera.position.z = distance;
   }
 
-  function syncAutoRotate(target) {
+  function setAutoRotate(target) {
+    autoRotate = target;
     const chk = document.getElementById('terrain-rotate');
     if (chk) chk.checked = target;
-    return target;
   }
 
   function savePng() {
@@ -262,43 +331,53 @@
   }
 
   function wireControls() {
-    const hSlider = document.getElementById('terrain-height');
-    const hVal = document.getElementById('terrain-height-val');
+    const dSlider = document.getElementById('terrain-density');
+    const dVal = document.getElementById('terrain-density-val');
+    if (dSlider) {
+      const apply = () => {
+        density = parseInt(dSlider.value, 10);
+        if (dVal) dVal.textContent = String(density);
+      };
+      dSlider.addEventListener('input', apply);
+      dSlider.addEventListener('change', () => { apply(); rebuild(); });
+      apply();
+    }
+    const hSlider = document.getElementById('terrain-depth');
+    const hVal = document.getElementById('terrain-depth-val');
     if (hSlider) {
-      hSlider.addEventListener('input', () => {
-        amplitude = parseFloat(hSlider.value);
-        if (hVal) hVal.textContent = String(amplitude);
-        rebuildMesh();
-      });
-      amplitude = parseFloat(hSlider.value);
-      if (hVal) hVal.textContent = String(amplitude);
+      const apply = () => {
+        depthAmplitude = parseFloat(hSlider.value);
+        if (hVal) hVal.textContent = String(depthAmplitude);
+      };
+      hSlider.addEventListener('input', apply);
+      hSlider.addEventListener('change', () => { apply(); rebuild(); });
+      apply();
     }
-    const gSlider = document.getElementById('terrain-grid');
-    const gVal = document.getElementById('terrain-grid-val');
-    if (gSlider) {
-      gSlider.addEventListener('input', () => {
-        gridResolution = parseInt(gSlider.value, 10);
-        if (gVal) gVal.textContent = String(gridResolution);
-      });
-      gSlider.addEventListener('change', () => {
-        gridResolution = parseInt(gSlider.value, 10);
-        rebuildMesh();
-      });
-      gridResolution = parseInt(gSlider.value, 10);
-      if (gVal) gVal.textContent = String(gridResolution);
-    }
-    const wf = document.getElementById('terrain-wire');
-    if (wf) wf.addEventListener('change', () => {
-      wireframe = wf.checked;
-      if (material) material.wireframe = wireframe;
+    const motion = document.getElementById('terrain-motion');
+    if (motion) motion.addEventListener('change', () => {
+      motionMode = motion.value;
+      motionStartTime = performance.now();
+      if (motionMode === 'none' && mesh) {
+        // Reset all matrices to base when stopping motion.
+        const dummy = new THREE.Object3D();
+        const scaleBase = cellSize * cellOverlap;
+        for (let r = 0; r < rows; r++) {
+          for (let c = 0; c < cols; c++) {
+            const idx = r * cols + c;
+            const x = (c - (cols - 1) / 2) * cellSize;
+            const y = -(r - (rows - 1) / 2) * cellSize;
+            dummy.position.set(x, y, baseZ[idx]);
+            dummy.rotation.set(0, 0, 0);
+            dummy.scale.set(scaleBase, scaleBase, 1);
+            dummy.updateMatrix();
+            mesh.setMatrixAt(idx, dummy.matrix);
+          }
+        }
+        mesh.instanceMatrix.needsUpdate = true;
+      }
     });
     const ar = document.getElementById('terrain-rotate');
     if (ar) ar.addEventListener('change', () => { autoRotate = ar.checked; });
-    const tex = document.getElementById('terrain-tex');
-    if (tex) tex.addEventListener('change', () => {
-      textureMode = tex.value;
-      rebuildMesh();
-    });
     const save = document.getElementById('terrain-save');
     if (save) save.addEventListener('click', savePng);
   }
@@ -312,7 +391,13 @@
       if (AnkleControl.state.activeMode === 'terrain') destroy();
     });
     AnkleControl.on('reference', () => {
-      if (AnkleControl.state.activeMode === 'terrain') refresh();
+      if (started && AnkleControl.state.activeMode === 'terrain') rebuild();
+    });
+    AnkleControl.on('asset', () => {
+      if (started && AnkleControl.state.activeMode === 'terrain') rebuild();
+    });
+    AnkleControl.on('background', () => {
+      if (started) applyBackground();
     });
   });
 })();

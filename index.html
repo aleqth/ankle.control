@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ankle.control — mosaic + terrain</title>
-<meta name="description" content="Render any image as a tiled mosaic of ankle silhouettes, or as a 3D heightmap terrain driven by image luminance. Part of the ANKLE OS.">
+<title>ankle.control — image → asset sculpture</title>
+<meta name="description" content="Recreate any image as a 2D mosaic or a 3D sculpture made from a tileable asset PNG. Part of the ANKLE OS.">
 <link rel="stylesheet" href="style.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -25,20 +25,24 @@
 
   <div class="window">
     <div class="window-title">
-      <span>ankle.control.exe — image → mosaic + terrain</span>
+      <span>ankle.control.exe — image → asset sculpture</span>
       <div class="actions"><span>_</span><span>□</span><span>×</span></div>
     </div>
     <div class="window-body">
 
-      <!-- Shared reference image picker -->
+      <!-- Shared inputs: reference (the picture) + asset (the brush) -->
       <div class="controls">
         <label for="ref-preset">Reference</label>
         <select id="ref-preset"></select>
         <span class="val"></span>
 
-        <label for="upload">Upload</label>
+        <label for="upload">Upload ref</label>
         <input id="upload" type="file" accept="image/*">
         <span class="val"></span>
+
+        <label for="asset-upload">Asset PNG</label>
+        <input id="asset-upload" type="file" accept="image/*">
+        <button id="asset-reset" class="btn" type="button">Reset to ankle</button>
       </div>
 
       <!-- Mode tabs -->
@@ -64,30 +68,47 @@
       <!-- TERRAIN panel -->
       <div data-mode-panel="terrain" style="display:none">
         <div class="controls">
-          <label for="terrain-height">Height</label>
-          <input id="terrain-height" type="range" min="0" max="60" value="18" step="1">
-          <span id="terrain-height-val" class="val">18</span>
+          <label for="terrain-density">Density</label>
+          <input id="terrain-density" type="range" min="30" max="160" value="70" step="2">
+          <span id="terrain-density-val" class="val">70</span>
 
-          <label for="terrain-grid">Grid res</label>
-          <input id="terrain-grid" type="range" min="40" max="220" value="120" step="2">
-          <span id="terrain-grid-val" class="val">120</span>
+          <label for="terrain-depth">Depth</label>
+          <input id="terrain-depth" type="range" min="0" max="30" value="6" step="0.5">
+          <span id="terrain-depth-val" class="val">6</span>
 
-          <label for="terrain-tex">Texture</label>
-          <select id="terrain-tex">
-            <option value="color">Color (image)</option>
-            <option value="grayscale">Grayscale</option>
-            <option value="depth">Depth shading</option>
+          <label for="terrain-motion">Motion</label>
+          <select id="terrain-motion">
+            <option value="none">None (still)</option>
+            <option value="wave">Wave</option>
+            <option value="pulse">Pulse</option>
+            <option value="twist">Twist</option>
           </select>
           <span class="val"></span>
 
+          <label for="bg-preset">Background</label>
+          <select id="bg-preset">
+            <option value="#7a7a82">Medium gray (default)</option>
+            <option value="#000000">Black</option>
+            <option value="#0a0a0e">Near black</option>
+            <option value="#ffffff">White</option>
+            <option value="#c0c0c0">Netscape gray</option>
+            <option value="#ffffe0">Legal-pad yellow</option>
+            <option value="#1d3a5f">Midnight blue</option>
+            <option value="image">— or use image —</option>
+          </select>
+          <span class="val"><input id="bg-color" type="color" value="#7a7a82" style="width:36px;height:18px;padding:0;border:1px inset #fff"></span>
+
+          <label for="bg-upload">BG image</label>
+          <input id="bg-upload" type="file" accept="image/*">
+          <button id="bg-clear" class="btn" type="button">Clear bg img</button>
+
           <div class="row-full">
-            <label class="chk"><input id="terrain-rotate" type="checkbox" checked> Auto-rotate</label>
-            <label class="chk"><input id="terrain-wire" type="checkbox"> Wireframe</label>
-            <button id="terrain-save" class="btn">Save PNG</button>
+            <label class="chk"><input id="terrain-rotate" type="checkbox"> Auto-rotate</label>
+            <button id="terrain-save" class="btn primary">Save PNG</button>
           </div>
         </div>
         <div class="info" style="margin-top:0;margin-bottom:10px;font-size:12px">
-          Drag inside the canvas to orbit. Mouse wheel to zoom. Auto-rotate disengages on drag.
+          Drag inside the canvas to orbit. Mouse wheel to zoom. Auto-rotate disengages on drag. Higher density = more detail but more instances (slower).
         </div>
       </div>
 
@@ -107,17 +128,27 @@
   <div class="info">
     <h2>What this is</h2>
     <p>
-      <code>ankle.control</code> is the image-driven render module of the
-      ANKLE OS. Pick a reference image (or upload one) and switch between
-      two renderings of it:
+      <code>ankle.control</code> rebuilds an image (the <b>reference</b>)
+      out of tiled copies of another image (the <b>asset</b>) — default
+      asset is the ankle silhouette. Two modes share the same source and
+      same brush:
     </p>
     <ul>
-      <li><b>MOSAIC</b> — tile the image with ankle silhouettes whose size and rotation track per-tile brightness and contrast. The original silhouette is <code>ankle_no_hand.png</code>. Slider controls tile density; <code>Save PNG (hi-res)</code> renders at the reference image's native resolution.</li>
-      <li><b>TERRAIN</b> — a <code>three.js</code> heightmap whose vertex Z is set from per-pixel luminance (0.299R + 0.587G + 0.114B). Reference image is mapped as the surface texture. Drag to orbit, wheel to zoom.</li>
+      <li><b>MOSAIC</b> — 2D. Tile the reference with the asset, sized
+        and rotated by per-tile brightness and contrast.
+        <code>Save PNG (hi-res)</code> renders at the reference's native
+        resolution.</li>
+      <li><b>TERRAIN</b> — 3D. Each tile becomes an instanced billboard
+        in space, positioned at its (x,y) in the picture, pushed forward
+        by per-pixel luminance, tinted to the reference colour. Head-on
+        it reads as the picture; drag to orbit and see the depth. Add
+        motion (wave / pulse / twist), pick or upload a background.</li>
     </ul>
     <p>
-      Both modes share the same source image. Uploading or picking a new
-      reference updates both. Source: <a href="https://github.com/aleqth/ankle.control">github.com/aleqth/ankle.control</a>.
+      Both modes use whatever you upload as the asset PNG — so the
+      Mona Lisa can be reassembled out of ankles, hearts, your face, or
+      any silhouette. Source:
+      <a href="https://github.com/aleqth/ankle.control">github.com/aleqth/ankle.control</a>.
     </p>
   </div>
 

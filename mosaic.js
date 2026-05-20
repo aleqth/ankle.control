@@ -1,36 +1,33 @@
 // mosaic.js — p5.js instance-mode mosaic renderer.
-// Tiles the reference image with ankle silhouettes whose size + rotation
-// track per-tile brightness and contrast.
+// Tiles the reference image with copies of the ASSET image (default:
+// ankle silhouette) whose size + rotation track per-tile brightness and
+// contrast.
 //
 // Fixes from v1:
 //   - Source image is never mutated. Each draw clones with .get() and
-//     resizes the clone only. Original survives slider tweaks + window
-//     resizes intact.
-//   - tileSize floor raised from 1 to 6 to prevent browser lock on
-//     very small tiles.
+//     resizes the clone only.
+//   - tileSize floor raised from 1 to 6.
 //   - windowResized hooked up.
 //   - Hi-res export renders to an off-screen p5.Graphics at the reference
 //     image's native resolution.
+//   - Uses shared AnkleControl.state.assetImage (so a user-uploaded
+//     asset works here too, not just in TERRAIN mode).
 
 (function () {
   let p5Instance = null;
   let tileSize = 40;
-  let p; // p5 instance reference for control handlers
-  let lastRefSig = null;
+  let p;
 
   function sketch(_p) {
     p = _p;
-    let stageWidth = 800;
-
-    _p.preload = function () {};
 
     _p.setup = function () {
       const stage = document.getElementById('mosaic-stage');
       const rect = stage.getBoundingClientRect();
-      stageWidth = Math.max(320, Math.floor(rect.width || 800));
+      const w = Math.max(320, Math.floor(rect.width || 800));
       const ref = AnkleControl.state.referenceImage;
       const ar = ref ? (ref.naturalWidth / ref.naturalHeight) : (3 / 4);
-      const cnv = _p.createCanvas(stageWidth, Math.floor(stageWidth / ar));
+      const cnv = _p.createCanvas(w, Math.floor(w / ar));
       cnv.parent(stage);
       _p.imageMode(_p.CENTER);
       _p.noLoop();
@@ -40,19 +37,15 @@
     _p.draw = function () {
       _p.background(255);
       const refImg = AnkleControl.state.referenceImage;
-      const tile = AnkleControl.state.tileImage;
-      if (!refImg || !tile) return;
+      const asset = AnkleControl.state.assetImage;
+      if (!refImg || !asset) return;
 
-      // Work from a fresh p5.Image cloned from the source HTMLImageElement
-      // so the original is never mutated. We size the work copy to the
-      // canvas dimensions so pixel iteration matches what's rendered.
       const work = _p.createImage(_p.width, _p.height);
       work.drawingContext.drawImage(refImg, 0, 0, _p.width, _p.height);
       work.loadPixels();
 
-      // Wrap the tile in a p5.Image so p5's image() can scale it.
-      const tileP5 = _p.createImage(tile.naturalWidth, tile.naturalHeight);
-      tileP5.drawingContext.drawImage(tile, 0, 0);
+      const tileP5 = _p.createImage(asset.naturalWidth, asset.naturalHeight);
+      tileP5.drawingContext.drawImage(asset, 0, 0);
 
       paintMosaic(_p, work, tileP5, tileSize);
     };
@@ -65,7 +58,6 @@
       const ref = AnkleControl.state.referenceImage;
       const ar = ref ? (ref.naturalWidth / ref.naturalHeight) : (3 / 4);
       _p.resizeCanvas(newW, Math.floor(newW / ar));
-      stageWidth = newW;
       requestRedraw();
     };
   }
@@ -105,13 +97,10 @@
     if (p && typeof p.redraw === 'function') p.redraw();
   }
 
-  // Hi-res export: re-render the mosaic at native source resolution into
-  // an off-screen p5.Graphics, then save that out as a PNG. The visible
-  // canvas is untouched.
   function exportHiRes() {
     const ref = AnkleControl.state.referenceImage;
-    const tile = AnkleControl.state.tileImage;
-    if (!ref || !tile || !p) {
+    const asset = AnkleControl.state.assetImage;
+    if (!ref || !asset || !p) {
       AnkleControl.setStatus('hi-res export unavailable: assets missing');
       return;
     }
@@ -124,9 +113,8 @@
       const work = p.createImage(w, h);
       work.drawingContext.drawImage(ref, 0, 0, w, h);
       work.loadPixels();
-      const tileP5 = p.createImage(tile.naturalWidth, tile.naturalHeight);
-      tileP5.drawingContext.drawImage(tile, 0, 0);
-      // Scale tile size proportional to current canvas tileSize.
+      const tileP5 = p.createImage(asset.naturalWidth, asset.naturalHeight);
+      tileP5.drawingContext.drawImage(asset, 0, 0);
       const scale = w / p.width;
       const ts = Math.max(6, Math.round(tileSize * scale));
       paintMosaic(g, work, tileP5, ts);
@@ -140,14 +128,11 @@
     if (p5Instance) return;
     p5Instance = new p5(sketch);
   }
-
   function stop() {
     if (p5Instance) { p5Instance.remove(); p5Instance = null; p = null; }
   }
-
   function refresh() {
     if (!p5Instance) return;
-    // Resize canvas to current reference aspect ratio, then redraw.
     const stage = document.getElementById('mosaic-stage');
     if (!stage) return;
     const rect = stage.getBoundingClientRect();
@@ -158,7 +143,6 @@
     requestRedraw();
   }
 
-  // Wire controls (slider + save buttons)
   function wireControls() {
     const slider = document.getElementById('mosaic-tile');
     const readout = document.getElementById('mosaic-tile-val');
@@ -179,10 +163,8 @@
     if (saveHiBtn) saveHiBtn.addEventListener('click', exportHiRes);
   }
 
-  // Hook into AnkleControl events
   document.addEventListener('DOMContentLoaded', () => {
     wireControls();
-
     AnkleControl.on('mode-enter', () => {
       if (AnkleControl.state.activeMode === 'mosaic') start();
     });
@@ -191,6 +173,9 @@
     });
     AnkleControl.on('reference', () => {
       if (AnkleControl.state.activeMode === 'mosaic') refresh();
+    });
+    AnkleControl.on('asset', () => {
+      if (AnkleControl.state.activeMode === 'mosaic') requestRedraw();
     });
   });
 })();
