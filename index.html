@@ -1,95 +1,127 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="X-UA-Compatible" content="ie=edge">
-  <title>Ankle Mosaic Generator</title>
-
-  <!-- Include p5.js Library from CDN -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
-
-  <!-- Link to Your Custom p5.js Script (sketch.js) -->
-  <script src="sketch.js" defer></script>
-
-  <style>
-    /* Basic styling to make the canvas responsive and fit both iOS and Desktop */
-    body {
-      margin: 0;
-      padding: 0;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      flex-direction: column;
-      background-color: #f0f0f0;
-      height: 100vh;
-    }
-
-    canvas {
-      max-width: 100%;
-      height: auto;
-    }
-
-    #controls {
-      margin-top: 15px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-    }
-
-    input[type="file"], input[type="range"] {
-      margin: 10px;
-      width: 80%;
-      max-width: 400px;
-    }
-
-    button {
-      padding: 10px 20px;
-      background-color: #4CAF50;
-      color: white;
-      border: none;
-      border-radius: 5px;
-      cursor: pointer;
-    }
-
-    button:hover {
-      background-color: #45a049;
-    }
-
-    /* Media query for mobile iPhone 13 Pro and up */
-    @media (max-width: 430px) {
-      input[type="file"], input[type="range"] {
-        width: 90%;
-      }
-
-      button {
-        width: 90%;
-      }
-    }
-
-    /* Media query for Desktop to avoid canvas overflow */
-    @media (min-width: 800px) {
-      canvas {
-        max-width: 800px; /* Set a max width to avoid overflowing the screen on desktop */
-      }
-
-      input[type="file"], input[type="range"] {
-        max-width: 400px; /* Ensure controls remain at a reasonable size on desktop */
-      }
-    }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ankle.control — mosaic + terrain</title>
+<meta name="description" content="Render any image as a tiled mosaic of ankle silhouettes, or as a 3D heightmap terrain driven by image luminance. Part of the ANKLE OS.">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="app.js" defer></script>
+<script src="mosaic.js" defer></script>
+<script src="terrain.js" defer></script>
 </head>
 <body>
-  <div id="controls">
-    <!-- Upload Button -->
-    <input type="file" id="upload" accept="image/*">
-    
-    <!-- Slider to control "tightness" -->
-    <input type="range" id="controlSlider" min="1" max="80" value="40">
-    <label for="controlSlider">Control Density</label>
 
-    <!-- Save Button -->
-    <button id="saveBtn">Save Image</button>
+<nav class="nav">
+  <a class="brand" href="https://ankle.website/">ankle.website</a>
+  <span class="sep">/</span>
+  <span>control</span>
+  <span class="right">ANKLE OS // ankle96</span>
+</nav>
+
+<main class="shell">
+
+  <div class="window">
+    <div class="window-title">
+      <span>ankle.control.exe — image → mosaic + terrain</span>
+      <div class="actions"><span>_</span><span>□</span><span>×</span></div>
+    </div>
+    <div class="window-body">
+
+      <!-- Shared reference image picker -->
+      <div class="controls">
+        <label for="ref-preset">Reference</label>
+        <select id="ref-preset"></select>
+        <span class="val"></span>
+
+        <label for="upload">Upload</label>
+        <input id="upload" type="file" accept="image/*">
+        <span class="val"></span>
+      </div>
+
+      <!-- Mode tabs -->
+      <div class="tabs" role="tablist">
+        <button class="tab active" data-mode="mosaic">MOSAIC</button>
+        <button class="tab" data-mode="terrain">TERRAIN</button>
+      </div>
+
+      <!-- MOSAIC panel -->
+      <div data-mode-panel="mosaic">
+        <div class="controls">
+          <label for="mosaic-tile">Tile size</label>
+          <input id="mosaic-tile" type="range" min="6" max="80" value="40">
+          <span id="mosaic-tile-val" class="val">40</span>
+
+          <div class="row-full">
+            <button id="mosaic-save" class="btn">Save PNG</button>
+            <button id="mosaic-save-hires" class="btn primary">Save PNG (hi-res)</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- TERRAIN panel -->
+      <div data-mode-panel="terrain" style="display:none">
+        <div class="controls">
+          <label for="terrain-height">Height</label>
+          <input id="terrain-height" type="range" min="0" max="60" value="18" step="1">
+          <span id="terrain-height-val" class="val">18</span>
+
+          <label for="terrain-grid">Grid res</label>
+          <input id="terrain-grid" type="range" min="40" max="220" value="120" step="2">
+          <span id="terrain-grid-val" class="val">120</span>
+
+          <label for="terrain-tex">Texture</label>
+          <select id="terrain-tex">
+            <option value="color">Color (image)</option>
+            <option value="grayscale">Grayscale</option>
+            <option value="depth">Depth shading</option>
+          </select>
+          <span class="val"></span>
+
+          <div class="row-full">
+            <label class="chk"><input id="terrain-rotate" type="checkbox" checked> Auto-rotate</label>
+            <label class="chk"><input id="terrain-wire" type="checkbox"> Wireframe</label>
+            <button id="terrain-save" class="btn">Save PNG</button>
+          </div>
+        </div>
+        <div class="info" style="margin-top:0;margin-bottom:10px;font-size:12px">
+          Drag inside the canvas to orbit. Mouse wheel to zoom. Auto-rotate disengages on drag.
+        </div>
+      </div>
+
+      <!-- Canvas stages — one per mode -->
+      <div id="mosaic-stage" class="stage" data-mode-stage="mosaic"></div>
+      <div id="terrain-stage" class="stage" data-mode-stage="terrain" style="display:none"></div>
+
+      <div class="status-bar">
+        <span class="seg"><b id="status-msg">init</b></span>
+        <span class="seg">time=<b id="status-clock">--:--:--</b></span>
+        <span class="seg">part of <a href="https://ankle.website/">ankle.website</a></span>
+      </div>
+
+    </div>
   </div>
+
+  <div class="info">
+    <h2>What this is</h2>
+    <p>
+      <code>ankle.control</code> is the image-driven render module of the
+      ANKLE OS. Pick a reference image (or upload one) and switch between
+      two renderings of it:
+    </p>
+    <ul>
+      <li><b>MOSAIC</b> — tile the image with ankle silhouettes whose size and rotation track per-tile brightness and contrast. The original silhouette is <code>ankle_no_hand.png</code>. Slider controls tile density; <code>Save PNG (hi-res)</code> renders at the reference image's native resolution.</li>
+      <li><b>TERRAIN</b> — a <code>three.js</code> heightmap whose vertex Z is set from per-pixel luminance (0.299R + 0.587G + 0.114B). Reference image is mapped as the surface texture. Drag to orbit, wheel to zoom.</li>
+    </ul>
+    <p>
+      Both modes share the same source image. Uploading or picking a new
+      reference updates both. Source: <a href="https://github.com/aleqth/ankle.control">github.com/aleqth/ankle.control</a>.
+    </p>
+  </div>
+
+</main>
+
 </body>
 </html>
