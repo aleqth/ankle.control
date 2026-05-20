@@ -85,6 +85,14 @@
           </select>
           <span class="val"></span>
 
+          <label for="terrain-tint">Asset color</label>
+          <select id="terrain-tint">
+            <option value="original" selected>Original (from PNG)</option>
+            <option value="solid">Solid color</option>
+            <option value="reference">From reference image</option>
+          </select>
+          <span class="val" id="tint-color-wrap" style="display:none"><input id="terrain-tint-color" type="color" value="#ff8c5a" style="width:36px;height:18px;padding:0;border:1px inset #fff"></span>
+
           <label for="bg-preset">Background</label>
           <select id="bg-preset">
             <option value="#7a7a82">Medium gray (default)</option>

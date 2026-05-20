@@ -22,6 +22,9 @@
   let autoRotate = false;
   let motionMode = 'none';     // 'none' | 'wave' | 'pulse' | 'twist'
   let motionStartTime = performance.now();
+  let tintMode = 'original';   // 'original' | 'solid' | 'reference'
+  let tintColor = '#ff8c5a';   // color used when tintMode === 'solid'
+  let scaleByLuminance = true; // make brighter pixels render larger so the image emerges
 
   // Per-instance state arrays, refreshed each rebuild.
   let baseZ = null;            // Float32Array of base Z per instance
@@ -135,8 +138,17 @@
 
     instanceCount = cols * rows;
 
-    // Asset texture from preprocessed white-silhouette canvas.
-    assetTexture = new THREE.CanvasTexture(assetCanvas);
+    // Texture choice depends on tint mode:
+    //   - 'original': use the asset PNG as-is, preserving its native color.
+    //   - 'solid' or 'reference': use the white-silhouette mask so per-
+    //     instance vertex colors actually tint the asset shape.
+    const useOriginalTexture = (tintMode === 'original');
+    const textureSource = useOriginalTexture
+      ? AnkleControl.state.assetImage
+      : assetCanvas;
+    assetTexture = useOriginalTexture
+      ? new THREE.Texture(textureSource)
+      : new THREE.CanvasTexture(textureSource);
     assetTexture.minFilter = THREE.LinearFilter;
     assetTexture.magFilter = THREE.LinearFilter;
     assetTexture.needsUpdate = true;
@@ -145,9 +157,9 @@
     material = new THREE.MeshBasicMaterial({
       map: assetTexture,
       transparent: true,
-      alphaTest: 0.2,         // sharper silhouette edges, less ghosting
+      alphaTest: 0.2,
       side: THREE.DoubleSide,
-      vertexColors: true,     // enables per-instance color × texture
+      vertexColors: !useOriginalTexture, // off in 'original' so PNG color is preserved
       depthWrite: true,
       depthTest: true,
     });
@@ -166,8 +178,9 @@
 
     const dummy = new THREE.Object3D();
     const color = new THREE.Color();
+    const solidColor = new THREE.Color(tintColor);
 
-    const scale = cellSize * cellOverlap;
+    const scaleBase = cellSize * cellOverlap;
 
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
@@ -181,21 +194,41 @@
         const z = lum * depthAmplitude;
         baseZ[idx] = z;
 
+        // Per-instance size: when we're not tinting per-pixel, the image
+        // would otherwise have no visual hierarchy head-on, so we modulate
+        // scale by luminance (bright pixels render larger). In 'reference'
+        // tint mode the per-pixel colour already carries that hierarchy,
+        // so we keep scale uniform.
+        let sc = scaleBase;
+        if (scaleByLuminance && tintMode !== 'reference') {
+          sc = scaleBase * (0.55 + lum * 0.85);
+        }
+
         dummy.position.set(x, y, z);
         dummy.rotation.set(0, 0, 0);
-        dummy.scale.set(scale, scale, 1);
+        dummy.scale.set(sc, sc, 1);
         dummy.updateMatrix();
         mesh.setMatrixAt(idx, dummy.matrix);
 
-        color.setRGB(rr / 255, gg / 255, bb / 255);
-        mesh.setColorAt(idx, color);
-        baseColor[idx * 3] = rr / 255;
-        baseColor[idx * 3 + 1] = gg / 255;
-        baseColor[idx * 3 + 2] = bb / 255;
+        if (tintMode === 'reference') {
+          color.setRGB(rr / 255, gg / 255, bb / 255);
+          mesh.setColorAt(idx, color);
+          baseColor[idx * 3] = rr / 255;
+          baseColor[idx * 3 + 1] = gg / 255;
+          baseColor[idx * 3 + 2] = bb / 255;
+        } else if (tintMode === 'solid') {
+          mesh.setColorAt(idx, solidColor);
+          baseColor[idx * 3] = solidColor.r;
+          baseColor[idx * 3 + 1] = solidColor.g;
+          baseColor[idx * 3 + 2] = solidColor.b;
+        }
+        // 'original': no instanceColor — texture is used unmodified.
       }
     }
     mesh.instanceMatrix.needsUpdate = true;
-    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    if (mesh.instanceColor && tintMode !== 'original') {
+      mesh.instanceColor.needsUpdate = true;
+    }
 
     // Center mesh + apply current orientation
     mesh.rotation.set(pitch, yaw, 0);
@@ -204,10 +237,17 @@
     AnkleControl.setStatus('terrain: ' + instanceCount + ' instances (' + cols + '×' + rows + ')');
   }
 
+  function instanceBaseScale(lum) {
+    const base = cellSize * cellOverlap;
+    if (scaleByLuminance && tintMode !== 'reference') {
+      return base * (0.55 + lum * 0.85);
+    }
+    return base;
+  }
+
   function applyMotion(timeSec) {
     if (!mesh || motionMode === 'none') return;
     const dummy = new THREE.Object3D();
-    const scaleBase = cellSize * cellOverlap;
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
         const idx = r * cols + c;
@@ -215,11 +255,13 @@
         const y = -(r - (rows - 1) / 2) * cellSize;
         let z = baseZ[idx];
         let rotZ = 0;
-        let sc = scaleBase;
+        // Recover luminance from base z to keep scale modulation correct.
+        const lum = depthAmplitude > 0 ? Math.min(1, z / depthAmplitude) : 0.5;
+        let sc = instanceBaseScale(lum);
         if (motionMode === 'wave') {
           z += Math.sin(timeSec * 1.6 + c * 0.18 + r * 0.05) * 1.4;
         } else if (motionMode === 'pulse') {
-          sc = scaleBase * (1 + Math.sin(timeSec * 2 + (r + c) * 0.07) * 0.18);
+          sc *= (1 + Math.sin(timeSec * 2 + (r + c) * 0.07) * 0.18);
         } else if (motionMode === 'twist') {
           rotZ = Math.sin(timeSec * 1.2 + idx * 0.013) * 0.5;
         }
@@ -360,21 +402,34 @@
       if (motionMode === 'none' && mesh) {
         // Reset all matrices to base when stopping motion.
         const dummy = new THREE.Object3D();
-        const scaleBase = cellSize * cellOverlap;
         for (let r = 0; r < rows; r++) {
           for (let c = 0; c < cols; c++) {
             const idx = r * cols + c;
             const x = (c - (cols - 1) / 2) * cellSize;
             const y = -(r - (rows - 1) / 2) * cellSize;
+            const lum = depthAmplitude > 0 ? Math.min(1, baseZ[idx] / depthAmplitude) : 0.5;
             dummy.position.set(x, y, baseZ[idx]);
             dummy.rotation.set(0, 0, 0);
-            dummy.scale.set(scaleBase, scaleBase, 1);
+            const sc = instanceBaseScale(lum);
+            dummy.scale.set(sc, sc, 1);
             dummy.updateMatrix();
             mesh.setMatrixAt(idx, dummy.matrix);
           }
         }
         mesh.instanceMatrix.needsUpdate = true;
       }
+    });
+    const tint = document.getElementById('terrain-tint');
+    if (tint) tint.addEventListener('change', () => {
+      tintMode = tint.value;
+      const tcWrap = document.getElementById('tint-color-wrap');
+      if (tcWrap) tcWrap.style.display = (tintMode === 'solid') ? '' : 'none';
+      rebuild();
+    });
+    const tintC = document.getElementById('terrain-tint-color');
+    if (tintC) tintC.addEventListener('input', () => {
+      tintColor = tintC.value;
+      if (tintMode === 'solid') rebuild();
     });
     const ar = document.getElementById('terrain-rotate');
     if (ar) ar.addEventListener('change', () => { autoRotate = ar.checked; });
